@@ -1,163 +1,160 @@
 <h1 align="center">4gbVramStrata</h1>
 
-<p align="center"><b>Run 24B to 40B mixture-of-experts models on a laptop with a 4 GB graphics card.</b><br>
-No cloud, no API key, nothing leaves the machine.</p>
+<p align="center"><b>在配备 4 GB 显卡的笔记本电脑上运行 24B 到 40B 的混合专家模型。</b><br>
+无需云端，无需 API 密钥，所有数据都不离开本机。</p>
 
 <p align="center">
-  <a href="#measured-on-a-4-gb-laptop">Measured</a> ·
-  <a href="#the-models">Models</a> ·
-  <a href="#install">Install</a> ·
-  <a href="#use-it">Use it</a> ·
-  <a href="#how-it-works">How it works</a> ·
-  <a href="docs/BENCH-4GB.md">Benchmarks</a>
+  <a href="#measured-on-a-4-gb-laptop">实测</a> ·
+  <a href="#the-models">模型</a> ·
+  <a href="#install">安装</a> ·
+  <a href="#use-it">使用</a> ·
+  <a href="#how-it-works">工作原理</a> ·
+  <a href="docs/BENCH-4GB.md">基准测试</a>
 </p>
 
 ---
 
-A 35B mixture-of-experts model has about 35 billion parameters but uses only 3 billion of them for any one token. The
-rest sit still. That is the opening this project takes: keep the whole model in the PC's memory, keep the few experts
-that the next token needs in the graphics card, and let the CPU compute what does not fit. A 4 GB card is enough,
-because it never has to hold the model — only the hottest slice of it.
+一个 35B 的混合专家模型拥有约 350 亿个参数，但处理每个 token 时只使用其中约 30 亿个。其余
+参数保持不动。这正是本项目利用的切入点：将整个模型保留在电脑内存中，将下一个 token 所需的少数专家
+保留在显卡中，让 CPU 计算无法容纳的部分。4 GB 的显卡就足够了，
+因为它永远不需要容纳整个模型——只需要容纳其中最热的那一部分。
 
-This is a fork of [PolyStrata](https://github.com/VecSzn/PolyStrata), which is a fork of
-[Strata](https://github.com/Niko1221/Strata). It is tuned, measured and documented on one machine: an **RTX 3050
-Laptop with 4 GB of VRAM**, a Ryzen 5 5500U and 32 GB of RAM, on Windows 11.
+本项目是 [PolyStrata](https://github.com/VecSzn/PolyStrata) 的分支，而 PolyStrata 又是
+[Strata](https://github.com/Niko1221/Strata) 的分支。它在一台机器上进行了调优、测量和文档记录：一台 **RTX 3050
+笔记本，4 GB 显存**，Ryzen 5 5500U 和 32 GB 内存，运行 Windows 11。
 
-## Measured on a 4 GB laptop
+## 在 4 GB 笔记本上的实测
 
-Reference machine: RTX 3050 Laptop (4 GB, `sm_86`), Ryzen 5 5500U (6 cores, 12 threads), 32 GB DDR4-3200, Windows 11.
-The engine is built from this repository with CUDA 13 for `sm_75` to `sm_120`. **A chat request to the server — what a
-person actually uses** — on a saved prompt of about 1,900 tokens that ends in a question, 128 new tokens, 32K context,
-eight runs on a quiet machine. Median, with the range:
+参考机器：RTX 3050 Laptop（4 GB，`sm_86`），Ryzen 5 5500U（6 核 12 线程），32 GB DDR4-3200，Windows 11。
+引擎从本仓库构建，使用 CUDA 13，支持 `sm_75` 到 `sm_120`。**向服务器发送聊天请求——即
+用户实际使用的场景**——使用约 1,900 个 token 的已保存提示词，以一个问题结尾，生成 128 个新 token，32K 上下文，
+在安静的机器上运行八次。取中位数及范围：
 
-| Model | File | Reads the prompt | Answers | Experts in VRAM |
+| 模型 | 文件 | 读取提示词 | 生成回答 | 显存中的专家 |
 | --- | ---: | ---: | ---: | ---: |
-| Clover-35B-A3B-Preview APEX-I-NANOPLUS | 11.7 GB | 449 tokens/s | **38.1 tokens/s** (32.6-39.1) | 529 of 10,240 |
-| Flint 40B-A2.5B UD-Q3_K_XL | 17.2 GB | 331 tokens/s | **21.9 tokens/s** (20.5-22.4) | 518 of 12,032 |
+| Clover-35B-A3B-Preview APEX-I-NANOPLUS | 11.7 GB | 449 tokens/s | **38.1 tokens/s**（32.6-39.1） | 10,240 中的 529 个 |
+| Flint 40B-A2.5B UD-Q3_K_XL | 17.2 GB | 331 tokens/s | **21.9 tokens/s**（20.5-22.4） | 12,032 中的 518 个 |
 
-The prompt is `bench/speed/prompt.txt`, the harness is `bench/speed/run.py`, and every run appends one line to
-`bench/speed/runs.log` with the engine's SHA-256. The same prompt in the engine's raw token-id mode — the model
-continues the text instead of answering it — writes 31.1 and 21.6 tokens/s: a different task, and not the answer speed.
+提示词为 `bench/speed/prompt.txt`，测试工具为 `bench/speed/run.py`，每次运行都会向
+`bench/speed/runs.log` 追加一行记录，包含引擎的 SHA-256。同一提示词在引擎的原始 token-id 模式下——模型
+续写文本而非回答问题——写入速度为 31.1 和 21.6 tokens/s：这是不同的任务，不是回答速度。
 
-The settings are the ones setup writes: `--tail-skip 6`, `--no-graphs` and, on a card of 6 GB or less, `--kv q8_0` for
-Clover; `--prompt-batch 512`, `--expert-swaps 32` and `--no-graphs` for Flint.
+设置项为安装程序写入的配置：`--tail-skip 6`、`--no-graphs`，对于 Clover 在 6 GB 或以下的显卡上使用 `--kv q8_0`；
+对于 Flint 使用 `--prompt-batch 512`、`--expert-swaps 32` 和 `--no-graphs`。
 
-**An earlier version of this table said 47.5 and 40.7 tokens/s, and that is not reproduced.** Its prompt was not saved
-and its logs were lost — a mistake this page now corrects — and the same request writes 38.1 and 21.9 today. The old
-figure is kept in [docs/BENCH-4GB.md](docs/BENCH-4GB.md), marked as not reproduced, because erasing it would hide what
-happened.
+**本表早期版本曾显示 47.5 和 40.7 tokens/s，但这一数据无法复现。** 其提示词未保存，
+日志已丢失——本页面现已更正这一错误——同样的请求如今写入速度为 38.1 和 21.9。旧数据保留在
+[docs/BENCH-4GB.md](docs/BENCH-4GB.md) 中，标记为不可复现，因为抹去它会掩盖曾经发生的事。
 
-Two files of 12 and 17 GB answer at 22 to 38 tokens per second on a fresh prompt, though neither fits in the card at
-all: the load takes about two seconds, and after that the card runs the experts it holds while the CPU runs the rest.
-A conversation grown to 32K is about half as fast ([the curve](docs/BENCH-4GB.md#context-and-speed)); with 8-bit
-attention caches the loss is smaller — on the raw continuation task at 24,000 tokens of context, 39.0 against 30.9
-tokens/s, same prompt and settings, three rounds.
+两个分别为 12 GB 和 17 GB 的文件在新提示词上以每秒 22 到 38 个 token 的速度回答，尽管它们都完全无法放入显卡：
+加载约需两秒，之后显卡运行其持有的专家，CPU 运行其余部分。
+增长到 32K 的对话速度大约减半（[曲线图](docs/BENCH-4GB.md#context-and-speed)）；使用 8 位
+注意力缓存时损失更小——在 24,000 token 上下文的原始续写任务中，39.0 对 30.9
+tokens/s，相同提示词和设置，三轮测试。
 
-Every number, its log, the settings measured one at a time, what a conversation costs as it grows to 32K, and what
-was **not** measured: **[docs/BENCH-4GB.md](docs/BENCH-4GB.md)**.
+每个数字、其日志、逐项测量的设置、对话增长到 32K 时的开销，以及**未**测量的内容：
+**[docs/BENCH-4GB.md](docs/BENCH-4GB.md)**。
 
-## The models
+## 模型
 
-Twelve models, each from the vendor's own GGUF or a well-known quantizer's. Two are measured on 4 GB here; the rest
-are listed with what the installer estimates for this card. Sizes are the smallest download; details, quant sizes,
-vendor scores and sources: **[docs/MODELS-4GB.md](docs/MODELS-4GB.md)**.
+十二个模型，每个来自厂商自己的 GGUF 或知名量化者的版本。其中两个在此 4 GB 机器上进行了实测；其余
+列出的是安装程序对此显卡的估算值。大小为最小下载量；详细信息、量化大小、
+厂商评分和来源：**[docs/MODELS-4GB.md](docs/MODELS-4GB.md)**。
 
-| Model | Parameters | Smallest file | On a 4 GB card |
+| 模型 | 参数 | 最小文件 | 在 4 GB 显卡上 |
 | --- | --- | ---: | --- |
-| **Clover-35B-A3B-Preview** (DiffuSpace) | 35B / 3B active | 13 GB | **measured**, 38.1 tokens/s |
-| **Flint 40B-A2.5B** (Recursive) | 40B / 2.5B active | 18 GB | **measured**, 21.9 tokens/s |
-| **LFM2.5-24B-A2B** (Liquid AI) | 24B / 2B active | 11 GB | should start; not run here |
-| **Qwen3.6-35B-A3B** (Qwen) | 35B / 3B active | 13 GB | no: 4.2 GB before any expert |
-| **Ornith 1.5-35B-A3B** (ornith-ai) | 35B / 3B active | 14 GB | the smallest size should start; not run here |
-| **Tiel Coder 35B-A3B** (peculiar-ragdoll) | 35B / 3B active | 14 GB | no: 4.4 GB before any expert |
-| **Gemma 4 26B-A4B** (Google) | 26B / 3.8B active | 11 GB | no: 4.1 GB before any expert |
-| **MiniCPM-V 4.7 35B-A3B** (OpenBMB) | 35B / 3B active | 16 GB | should start; not run here |
-| **Kolibri 1** (Aleph Alpha) | 78B / 3.5B active | 29 GB | no: 4.1 GB before any expert |
-| **GLM 5.3 Flash** (Zhipu) | 320B / 18B active | 79 GB | no: needs a 32 GB card |
-| **DeepSeek V4 Flash** (DeepSeek) | 284B / 13B active | 91 GB | no: needs a 32 GB card |
-| **Qwen3.8-Flash-Next** (Qwen) | 125B / 6B + 51B n-gram | 58 GB | no: needs a 12 GB card and 32 GB of RAM |
+| **Clover-35B-A3B-Preview**（DiffuSpace） | 35B / 3B 激活 | 13 GB | **已实测**，38.1 tokens/s |
+| **Flint 40B-A2.5B**（Recursive） | 40B / 2.5B 激活 | 18 GB | **已实测**，21.9 tokens/s |
+| **LFM2.5-24B-A2B**（Liquid AI） | 24B / 2B 激活 | 11 GB | 应该能启动；此处未运行 |
+| **Qwen3.6-35B-A3B**（Qwen） | 35B / 3B 激活 | 13 GB | 不能：任何专家之前已占 4.2 GB |
+| **Ornith 1.5-35B-A3B**（ornith-ai） | 35B / 3B 激活 | 14 GB | 最小尺寸应该能启动；此处未运行 |
+| **Tiel Coder 35B-A3B**（peculiar-ragdoll） | 35B / 3B 激活 | 14 GB | 不能：任何专家之前已占 4.4 GB |
+| **Gemma 4 26B-A4B**（Google） | 26B / 3.8B 激活 | 11 GB | 不能：任何专家之前已占 4.1 GB |
+| **MiniCPM-V 4.7 35B-A3B**（OpenBMB） | 35B / 3B 激活 | 16 GB | 应该能启动；此处未运行 |
+| **Kolibri 1**（Aleph Alpha） | 78B / 3.5B 激活 | 29 GB | 不能：任何专家之前已占 4.1 GB |
+| **GLM 5.3 Flash**（Zhipu） | 320B / 18B 激活 | 79 GB | 不能：需要 32 GB 显卡 |
+| **DeepSeek V4 Flash**（DeepSeek） | 284B / 13B 激活 | 91 GB | 不能：需要 32 GB 显卡 |
+| **Qwen3.8-Flash-Next**（Qwen） | 125B / 6B + 51B n-gram | 58 GB | 不能：需要 12 GB 显卡和 32 GB 内存 |
 
-"Before any expert" is what a size takes in VRAM for its dense weights, attention caches and buffers. A card that has
-that much left over starts, with a smaller expert cache; **[docs/BENCH-4GB.md](docs/BENCH-4GB.md#the-engine-this-release-ships)**
-has what that costs.
+"任何专家之前"指的是某个尺寸在显存中占用的稠密权重、注意力缓存和缓冲区。剩余显存足够的显卡
+可以启动，但专家缓存更小；**[docs/BENCH-4GB.md](docs/BENCH-4GB.md#the-engine-this-release-ships)**
+说明了其代价。
 
-## Install
+## 安装
 
-Windows 10 or 11, 64-bit. An NVIDIA RTX 20 series card or newer, driver 580 or newer. 16 GB of RAM runs the smaller
-models, 32 GB the two measured above. Python 3.10 or newer: setup installs it for your user account if it is missing,
-no administrator needed.
+Windows 10 或 11，64 位。NVIDIA RTX 20 系列或更新显卡，驱动 580 或更新。16 GB 内存可运行较小
+模型，32 GB 可运行上述两个实测模型。Python 3.10 或更新：如果缺失，安装程序会为你的用户账户安装，
+无需管理员权限。
 
-1. Download **[the latest release](https://github.com/RandoTeam/4gbVramStrata/releases/latest)** and unzip it anywhere
-   with room for the model you want (11 to 92 GB).
-2. Run `START-HERE.bat`. On the first run it checks the PC, offers the models that fit, downloads one, writes its run
-   config and starts the server.
-3. Later runs start what is installed. `SETUP.bat` asks again — another model, another size, another context.
-   Setup writes a `run-<model>.bat` per installed model: one click, no questions.
+1. 下载 **[最新版本](https://github.com/RandoTeam/4gbVramStrata/releases/latest)** 并解压到任意
+   有足够空间存放所需模型的位置（11 到 92 GB）。
+2. 运行 `START-HERE.bat`。首次运行时它会检查电脑，提供适合的模型选项，下载一个，写入运行
+   配置并启动服务器。
+3. 后续运行会启动已安装的内容。`SETUP.bat` 会再次询问——另一个模型、另一个尺寸、另一个上下文。
+   安装程序会为每个已安装模型写入一个 `run-<model>.bat`：一键启动，无需回答任何问题。
 
-The first run downloads the Python packages (a few hundred MB) and the model. Nothing needs a compiler: the engine is
-already inside the release, built for every RTX 20 to RTX 50 card.
+首次运行会下载 Python 包（几百 MB）和模型。无需编译器：引擎
+已包含在发行版中，为所有 RTX 20 到 RTX 50 显卡构建。
 
-## Use it
+## 使用
 
-The server speaks both API dialects at once, so most tools work by changing one address:
+服务器同时支持两种 API 协议，因此大多数工具只需更改一个地址：
 
 | | |
 | --- | --- |
-| OpenAI | `http://127.0.0.1:8080/v1` — `/chat/completions`, `/completions`, `/models`, tool calls, streaming |
-| Anthropic | `http://127.0.0.1:8080/v1/messages` — what Claude Code speaks |
-| Web app | `http://127.0.0.1:8080` — chat, model switch, live monitor |
-| MCP | `docs/MCP_SERVER.md` — install, start, stop and switch from an AI assistant |
+| OpenAI | `http://127.0.0.1:8080/v1` — `/chat/completions`、`/completions`、`/models`、工具调用、流式传输 |
+| Anthropic | `http://127.0.0.1:8080/v1/messages` — Claude Code 使用的接口 |
+| Web 应用 | `http://127.0.0.1:8080` — 聊天、模型切换、实时监控 |
+| MCP | `docs/MCP_SERVER.md` — 从 AI 助手安装、启动、停止和切换 |
 
-Any API key works (a local server checks none). Point an agent at the address and it behaves like a hosted model, with
-one difference: it is slower on the first token of a long prompt, and it lives on your desk.
+任何 API 密钥均可（本地服务器不检查）。将代理指向该地址，它就会像托管模型一样工作，
+唯一的区别是：长提示词的第一个 token 较慢，而且它就在你的桌面上运行。
 
-## How it works
+## 工作原理
 
-The engine that makes this project (`strata-fourgbvram`, in `src/fourgbvram/`) reads the model's GGUF file in place.
-The dense weights, the attention caches and one slot per cached expert live in VRAM; every other expert stays in the
-file, which the operating system caches in RAM. Each token routes to a handful of experts per layer. The engine copies
-the ones it does not hold into the slots of the ones it uses least, over PCIe, while the answer is being written —
-that copy is the price of a small card, and most of this project's work is making it cheaper and spending it on the
-right experts.
+使本项目成为可能的引擎（`strata-fourgbvram`，位于 `src/fourgbvram/`）就地读取模型的 GGUF 文件。
+稠密权重、注意力缓存和每个缓存专家一个槽位驻留在显存中；其他所有专家留在
+文件中，由操作系统缓存在内存中。每个 token 在每层路由到少数几个专家。引擎将
+它不持有的专家复制到它使用最少的专家的槽位中，通过 PCIe 传输，在回答生成的同时进行——
+这次复制就是小显卡的代价，本项目的大部分工作就是让它更便宜，并将它花在
+正确的专家上。
 
-A second engine, `strata` (`src/`, `include/`), runs Qwen3.8-Flash-Next and comes unchanged from Strata.
+第二个引擎 `strata`（`src/`、`include/`）运行 Qwen3.8-Flash-Next，原样来自 Strata。
 
-## Something went wrong?
+## 出问题了？
 
-- **The card seems to be the problem.** Another program is using the VRAM: close browsers with hardware acceleration,
-  other model servers, anything with a GPU view. One model at a time on 4 GB.
-- **The answer is much slower than the table above.** The expert cache started empty (a card just under the size) or
-  another process took the VRAM. The start prints how many experts it holds; the log of the last run is
-  `strata-<model>.log` beside the program.
-- **The start failed.** [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) has the table; the first lines of
-  `strata-<model>.log` usually name the cause.
+- **显卡似乎是问题所在。** 另一个程序正在使用显存：关闭带硬件加速的浏览器、
+  其他模型服务器、任何带 GPU 视图的程序。4 GB 上一次只能运行一个模型。
+- **回答比上表慢得多。** 专家缓存启动时为空（显卡刚好不够大）或
+  另一个进程占用了显存。启动时会打印它持有多少专家；上次运行的日志位于
+  程序旁边的 `strata-<model>.log`。
+- **启动失败。** [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) 有对照表；
+  `strata-<model>.log` 的前几行通常会指明原因。
 
-## Docs
+## 文档
 
-- **[docs/INDEX.md](docs/INDEX.md)** - which page answers what, and which numbers are measured on this laptop rather than inherited.
-- **[docs/BENCH-4GB.md](docs/BENCH-4GB.md)** - what this hardware measured, with the logs.
-- **[docs/MEMORY-4GB.md](docs/MEMORY-4GB.md)** - where the bytes live: the VRAM, RAM and SSD budget per model and per token.
-- **[docs/QUALITY-4GB.md](docs/QUALITY-4GB.md)** - the twenty-two-prompt smoke test run after every speed change (code that must run, a tool loop, three facts across 18K tokens), and what it found.
-- **[docs/MODELS-4GB.md](docs/MODELS-4GB.md)** - the twelve models, sizes, scores, sources.
-- **[docs/INSTALL.md](docs/INSTALL.md)** - every install question, offline installs, other drives.
-- **[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)** - what to do when a start fails.
-- **[docs/AI_SETUP.md](docs/AI_SETUP.md)** - hand the install to an AI assistant.
+- **[docs/INDEX.md](docs/INDEX.md)** - 哪个页面回答什么问题，以及哪些数字是在此笔记本上实测的而非继承的。
+- **[docs/BENCH-4GB.md](docs/BENCH-4GB.md)** - 此硬件的实测数据，附日志。
+- **[docs/MEMORY-4GB.md](docs/MEMORY-4GB.md)** - 字节驻留位置：每个模型和每个 token 的显存、内存和 SSD 预算。
+- **[docs/QUALITY-4GB.md](docs/QUALITY-4GB.md)** - 每次速度变更后运行的二十二提示词冒烟测试（必须运行的代码、工具循环、跨 18K token 的三个事实），及其发现。
+- **[docs/MODELS-4GB.md](docs/MODELS-4GB.md)** - 十二个模型、大小、评分、来源。
+- **[docs/INSTALL.md](docs/INSTALL.md)** - 所有安装问题、离线安装、其他驱动器。
+- **[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)** - 启动失败时该怎么办。
+- **[docs/AI_SETUP.md](docs/AI_SETUP.md)** - 将安装交给 AI 助手。
 
-## Status
+## 状态
 
-The engine, the installer and the server are used daily on the reference laptop. What that means honestly:
+引擎、安装程序和服务器在参考笔记本上日常使用。诚实地说，这意味着：
 
-- **Measured on 4 GB:** Clover APEX-I-NANOPLUS and Flint UD-Q3_K_XL, at 32K. Not 131K, not the other ten models.
-- **131K context** is what the engine and its build support, and what the release is named after; only 32K has been
-  measured here.
-- **New speed settings** are measured against the previous ones in the same session, and a setting that does not
-  reproduce is dropped, not documented as a win.
+- **在 4 GB 上实测：** Clover APEX-I-NANOPLUS 和 Flint UD-Q3_K_XL，32K 上下文。不是 131K，不是其他十个模型。
+- **131K 上下文**是引擎及其构建支持的，也是发行版命名所依据的；此处仅测量了 32K。
+- **新的速度设置**在同一会话中与之前的设置进行对比测量，无法复现的设置会被丢弃，而不是作为胜利记录下来。
 
-## Credits and license
+## 致谢与许可
 
-Built on [PolyStrata](https://github.com/VecSzn/PolyStrata) by VecSzn, itself built on
-[Strata](https://github.com/Niko1221/Strata) by Niko1221. The Qwen engine, the installer, the server and the web app
-come from Strata; the 4 GB engine, its measurements and this documentation are this fork's. Models keep their own
-licenses — each page in [docs/models/](docs/models/) names the one that applies.
+基于 VecSzn 的 [PolyStrata](https://github.com/VecSzn/PolyStrata) 构建，而后者又基于
+Niko1221 的 [Strata](https://github.com/Niko1221/Strata) 构建。Qwen 引擎、安装程序、服务器和 Web 应用
+来自 Strata；4 GB 引擎、其测量数据和本文档属于本分支。模型保留各自的
+许可证——[docs/models/](docs/models/) 中的每个页面都注明了适用的许可证。
 
-MIT, see [LICENSE](LICENSE).
+MIT，参见 [LICENSE](LICENSE)。
